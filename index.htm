@@ -107,104 +107,69 @@ const toBase64 = (file) => new Promise((resolve, reject) => {
 
 // START: services/geminiService.ts
 const buildGenerationPrompt = (
-    category, 
-    options, 
-    wornItems, 
+    category,
+    options,
+    wornItems,
     gender,
     isReplacing
 ) => {
     const itemsForPrompt = isReplacing ? wornItems.filter(id => id !== category.id) : wornItems;
-    const layeringPrompt = itemsForPrompt.length > 0 ? `**LAYERING LOGIC:** The person is already wearing: ${itemsForPrompt.join(', ')}. Ensure the new item layers correctly and realistically over these existing items.` : '';
-    
-    const isCreativeRequest = options.customPrompt?.includes('@') ?? false;
+    const layeringPrompt = itemsForPrompt.length > 0
+        ? `Note: The person is already wearing: ${itemsForPrompt.join(', ')}. Ensure the new item layers realistically on top or underneath as appropriate.`
+        : 'The person is not wearing any other items of note.';
+
     const customPromptText = options.customPrompt?.replace('@', '').trim() ?? '';
 
-    const masterDirectives = `
-**CRITICAL DIRECTIVES (ABSOLUTE & NON-NEGOTIABLE):**
+    const baseInstructions = `
+**MISSION**: Your task is to perform a hyper-realistic virtual try-on. The goal is flawless photorealism and seamless integration. Adherence to these rules is ABSOLUTE & NON-NEGOTIABLE.
 
-1.  **PERSON PRESERVATION (TOP PRIORITY):** The person in the [BASE_IMAGE] is inviolable. You MUST preserve their face, identity, body shape, skin tone, hair, and pose with 100% fidelity. Any change to the person's identity is a complete mission failure.
-
-2.  **BACKGROUND INTEGRITY:** The entire background of the [BASE_IMAGE] must also remain 100% unchanged.
-
-3.  **REALISM & INTEGRATION:** The new item must be integrated with perfect photorealism. This includes matching the lighting, shadows, perspective, and fabric drape of the [BASE_IMAGE]. ${isCreativeRequest ? 'The item itself can be creative/imaginary as requested, but its integration must be realistic.' : ''}
+**CORE DIRECTIVES**:
+1.  **IDENTITY PRESERVATION**: The person in [BASE_IMAGE]—including their face, hair, body shape, pose, and skin tone—MUST remain UNCHANGED. Do not alter their identity or expression.
+2.  **BACKGROUND INTEGRITY**: The background, environment, and all other objects in [BASE_IMAGE] MUST remain completely UNALTERED.
+3.  **PHYSICS & REALISM**:
+    *   **Fabric Drape & Fit**: The new clothing item must drape, fold, and stretch naturally according to the person's body and pose. It must look like it truly fits them.
+    *   **Lighting & Shadow**: The item MUST perfectly match the lighting direction, hardness, color temperature, and intensity of the original [BASE_IMAGE]. Create realistic, subtle shadows and highlights on the new item, and cast realistic shadows from the item onto the person's body and vice-versa.
+    *   **Perspective & Texture**: The item must be scaled and warped to precisely match the camera's perspective. Preserve or generate a realistic texture for the material.
 `;
+
+    const itemDescriptionMap = {
+        shirt: 'the shirt', pants: 'the pants', tie: 'the necktie', watch: 'the wristwatch', shoes: 'the pair of shoes', shawl: 'the shawl or scarf', hijab: 'the hijab', dress: 'the dress', handbag: 'the handbag', jacket: 'the jacket, vest, or blazer', jubba: "the women's jubba", graduationGown: 'the graduation gown', dishdasha: "the dishdasha", chador: "the chador", abaya: "the abaya"
+    };
+    const aiItemName = itemDescriptionMap[category.id] || `the ${category.id}`;
 
     if (category.id === 'customItem') {
         if (options.clothingFile && options.clickCoords) {
             const { x, y, width, height } = options.clickCoords;
             const coordsText = `(x: ${(x / width).toFixed(3)}, y: ${(y / height).toFixed(3)})`;
-            const itemIdentifier = customPromptText 
-                ? `the item best described as "${customPromptText}"` 
-                : 'the primary object of interest';
-
+            const itemIdentifier = customPromptText ? `the item described as "${customPromptText}"` : 'the object';
             return `
-You are 'Stitch', a world-class expert in digital compositing. Your sole purpose is to execute flawless object extraction and placement.
-**[BASE_IMAGE]:** The user's photo. This is your canvas.
-**[SOURCE_IMAGE]:** An image containing an object to be extracted.
-
-**MISSION:**
-Your mission is to generate a new, photorealistic image that is an EXACT copy of the [BASE_IMAGE], but with a new object from the [SOURCE_IMAGE] added to it.
-
-**TASK:**
-The user has clicked near coordinates ${coordsText} in the [SOURCE_IMAGE] as a strong hint to identify ${itemIdentifier}. Your task is to extract this object and composite it onto the person in the [BASE_IMAGE] as realistically as possible.
-
-${masterDirectives}
-${layeringPrompt}`;
-        
+**TASK**: Identify ${itemIdentifier} in [SOURCE_IMAGE] (indicated by a click near coordinates ${coordsText}). Extract this object and masterfully place it onto the person in [BASE_IMAGE].
+${baseInstructions}
+**LAYERING**: ${layeringPrompt}
+`;
         } else if (customPromptText && !options.clothingFile) {
-            return `
-You are an expert, hyper-precise photo-editing AI. Your task is to perform a localized and precise modification to the [BASE_IMAGE] based ONLY on the user's text request.
-**[BASE_IMAGE]:** The user's photo.
-**USER REQUEST:** "${customPromptText}"
-
-**CRITICAL DIRECTIVES:**
-1.  **MINIMAL CHANGE PRINCIPLE:** You must apply the requested change with the absolute minimum alteration to the rest of the image. The edit must be strictly confined to the relevant area. For example, 'change the shirt to red' must ONLY affect the shirt. 'Add a hat' must not change the face.
-2.  **PRESERVATION:** The person's identity, body, pose, and the entire background MUST be preserved unless they are the direct subject of the edit.
-3.  **INTERPRETATION:** Interpret the request literally. Do not re-imagine the scene. This is a surgical edit, not a creative generation.
-
-${layeringPrompt}`;
+             const creativeMarker = options.customPrompt?.includes('@');
+             const creativityPrompt = creativeMarker ? "\n**CREATIVE FREEDOM**: The '@' symbol was used, allowing for a more imaginative or fantastical interpretation of the request, while still respecting the core directives." : "";
+             return `
+**TASK**: Execute a precise and localized edit on [BASE_IMAGE] based on this request: "${customPromptText}".
+**CORE DIRECTIVES**:
+1.  **MINIMAL CHANGE**: Alter ONLY what is explicitly requested. The rest of the person and the entire background must remain IDENTICAL to the original.
+2.  **REALISM**: The edit must be photorealistic and seamlessly integrated.
+${creativityPrompt}
+**LAYERING**: ${layeringPrompt}
+`;
         }
         return '';
-    } else { 
-        const itemDescriptionMap = {
-            shirt: 'the shirt',
-            pants: 'the pants',
-            tie: 'the necktie',
-            watch: 'the wristwatch',
-            shoes: 'the pair of shoes',
-            shawl: 'the shawl or scarf',
-            hijab: 'the hijab',
-            dress: 'the dress',
-            handbag: 'the handbag',
-            jacket: 'the jacket, vest, or blazer',
-            jubba: "the women's jubba",
-            graduationGown: 'the graduation gown',
-            dishdasha: "the dishdasha",
-            chador: "the chador",
-            abaya: "the abaya"
-        };
-        const aiItemName = itemDescriptionMap[category.id] || `the ${category.id}`;
-        
-        const persona = `You are 'Stitch', a world-class virtual tailor and digital compositing expert. Your sole purpose is to execute flawless virtual try-on operations.`;
-        
+    } else {
         if (options.clothingFile) {
             return `
-${persona}
-**[BASE_IMAGE]:** The user's photo.
-**[SOURCE_IMAGE]:** A photo containing the new ${aiItemName}.
-
-**MISSION:**
-Your mission is to generate a new, photorealistic image that is an EXACT copy of the [BASE_IMAGE], but with the person now wearing the new item from the [SOURCE_IMAGE].
-
-**TASK:**
-Take the "${aiItemName}" from the [SOURCE_IMAGE] and realistically place it onto the person in the [BASE_IMAGE]. You must intelligently replace any existing clothing that the new item would logically cover (e.g., replace an old shirt with the new one).
-
-${masterDirectives}
-${layeringPrompt}`;
-        } 
-        
-        else if (options.virtualPrompt || (category.id === 'abaya' && options.abayaType)) {
-            const action = isReplacing ? 'replace the existing one with' : 'add';
+**TASK**: Extract ${aiItemName} from [SOURCE_IMAGE] and expertly fit it onto the person in [BASE_IMAGE]. This is a professional virtual try-on.
+${baseInstructions}
+**INSTRUCTION**: This item should replace any existing clothing it would naturally cover.
+**LAYERING**: ${layeringPrompt}
+`;
+        } else if (options.virtualPrompt || (category.id === 'abaya' && options.abayaType)) {
+            const action = isReplacing ? `Replace the person's existing ${aiItemName} with` : 'Add';
             let virtualItemDescription = options.virtualPrompt;
             if (category.id === 'abaya' && options.abayaType) {
                 const abayaStyle = options.abayaType === 'open' ? 'an open-front style abaya' : 'a fully closed (Zainabiya style) abaya';
@@ -212,17 +177,11 @@ ${layeringPrompt}`;
             }
 
             return `
-${persona}
-**[BASE_IMAGE]:** The user's photo.
-
-**MISSION:**
-Your mission is to generate a new, photorealistic image that is an EXACT copy of the [BASE_IMAGE], but with a new virtual item added or replaced.
-
-**TASK:**
-Your task is to ${action} a photorealistic "${virtualItemDescription}" onto the person in the [BASE_IMAGE].
-
-${masterDirectives}
-${layeringPrompt}`;
+**TASK**: Generate and seamlessly integrate a new, hyper-realistic "${virtualItemDescription}" onto the person in [BASE_IMAGE].
+${baseInstructions}
+**INSTRUCTION**: ${action} this new item.
+**LAYERING**: ${layeringPrompt}
+`;
         }
     }
     console.error(`Could not build prompt for category '${category.id}' with options:`, options);
@@ -870,8 +829,9 @@ const App = () => {
 
     const [previewImage, setPreviewImage] = useState(null);
     const pendingGeneration = useRef(null);
-    const pendingCategory = useRef(null);
-
+    
+    const galleryInputRef = useRef(null);
+    const galleryCategoryRef = useRef(null);
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
     const backPressTimer = useRef(null);
@@ -1005,7 +965,7 @@ const App = () => {
         reader.onload = () => setPreviewImage(reader.result);
         
         setModal('preview');
-        pendingCategory.current = category;
+        galleryCategoryRef.current = category;
 
         pendingGeneration.current = (async () => {
             const clothingImagePart = { data: await toBase64(clothingFile), mimeType: clothingFile.type };
@@ -1019,9 +979,9 @@ const App = () => {
     }, [editedImage, apiKey, wornItems, gender]);
 
     const handleConfirmGeneration = useCallback(async () => {
-        if (!pendingGeneration.current || !editedImage || !pendingCategory.current) return;
+        if (!pendingGeneration.current || !editedImage || !galleryCategoryRef.current) return;
         
-        const category = pendingCategory.current;
+        const category = galleryCategoryRef.current;
         const isReplacing = category.id !== 'customItem' && wornItems.includes(category.id);
         
         setModal('closed');
@@ -1045,7 +1005,7 @@ const App = () => {
             setIsLoading(false);
             setPreviewImage(null);
             pendingGeneration.current = null;
-            pendingCategory.current = null;
+            galleryCategoryRef.current = null;
         }
     }, [editedImage, wornItems, t]);
 
@@ -1053,9 +1013,23 @@ const App = () => {
         setModal('closed');
         setPreviewImage(null);
         pendingGeneration.current = null;
-        pendingCategory.current = null;
+        galleryCategoryRef.current = null;
     };
+    
+    const handleGalleryFileChange = useCallback(async (e) => {
+        const file = e.target.files?.[0];
+        const category = galleryCategoryRef.current;
+        if (file && category) {
+            await startPreemptiveGeneration(category, { clothingFile: file });
+        }
+        if (e.target) e.target.value = null;
+    }, [startPreemptiveGeneration]);
 
+    const handleGallerySelect = useCallback(() => {
+        if (!currentCategory) return;
+        galleryCategoryRef.current = currentCategory;
+        galleryInputRef.current?.click();
+    }, [currentCategory]);
 
     const startCamera = (purpose) => {
         setCameraPurpose(purpose);
@@ -1183,7 +1157,7 @@ const App = () => {
             renderContent(),
             modal === 'source' && currentCategory && React.createElement(InputSourceModal, {
                 category: currentCategory, t: t, onClose: () => setModal('closed'),
-                onGallerySelect: () => document.getElementById('gallery-input')?.click(),
+                onGallerySelect: handleGallerySelect,
                 onCameraSelect: () => startCamera('clothing'),
                 onVirtualSelect: () => setModal(currentCategory?.id === 'abaya' ? 'abaya' : 'virtual')
             }),
@@ -1216,15 +1190,11 @@ const App = () => {
             }),
             React.createElement("canvas", { ref: canvasRef, className: "hidden" }),
             React.createElement("input", {
-                id: "gallery-input", type: "file", accept: "image/*", className: "hidden",
-                onChange: async (e) => {
-                    const file = e.target.files?.[0];
-                    if (file && currentCategory) {
-                        setModal('closed');
-                        await startPreemptiveGeneration(currentCategory, { clothingFile: file });
-                    }
-                    if(e.target) e.target.value = '';
-                }
+                ref: galleryInputRef,
+                type: "file",
+                accept: "image/*",
+                className: "hidden",
+                onChange: handleGalleryFileChange
             })
         ),
         isImageZoomed && editedImage && React.createElement("div", { className: "fixed inset-0 bg-black/90 flex items-center justify-center z-[100] animate-fade-in", onDoubleClick: () => setIsImageZoomed(false) },
